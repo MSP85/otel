@@ -1,0 +1,114 @@
+//Updated the configmap to receive otel trace and export to elasticsearch
+---
+apiVersion: v1
+kind: ServiceAccount 
+metadata:
+  name: grafana-agent
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: grafana-agent-image-pull
+data:
+  .dockerconfigjson: >-
+    eyJhdXRocyI6eyJkb2NZXItZW50ZXJwcm1zZS1kZXYtbG9jYWwuYXJOaWZhY3RyZXBvc210b3J5LmNpdG1ncm91cC5uZXQiOnsidXN1cm5hbWUiOiJhZHN1bnN1bG9va3VwIiwicGFzc3dvcmQ¡0¡JBSONwNWVrVDI1OUhDYmd3UGVEeHJMZGpVdExubWlORIV1Z29LWGtwam0zNjhmV25mZTdWQj1EV3Fma25xTGF0QOR5RW1uV1NwIiwiYXV0aCI6IllXUnpaVzV6ZFd4dmIydDFjRHBCUzB0d05XVnJWREkxT1VoRF1tZDNVR1ZFZUhKTVpHcFzkRXh1YldsMFJsVjFaMj1MV0d0d2FtMHpOamhtVjIlbVpUZFdRamxFVjNGbWEyNXhUR0ZvUTBSNVJXMXVWMU53IiwiZW1
+type: kubernetes.io/dockerconfigjson
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-agent-config
+data:
+  grafana-agent.river: |
+    receivers:
+      otlp:
+        protocols:
+          grpc:
+    exporters:
+      elasticsearch:
+        type: elasticsearch
+        endpoint: http://elasticsearch:9200
+    service:
+      pipelines:
+        traces:
+          receivers: [otlp]
+          exporters: [elasticsearch]
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: grafana-agent
+spec:
+  ports:
+    - name: otlp
+      protocol: TCP
+      port: 4317
+      targetPort: 4317
+  type: ClusterIP
+  selector:
+    name: grafana-agent
+---
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata:
+  name: grafana-agent
+  labels:
+    app: grafana-agent
+spec:
+  to:
+    kind: Service
+    name: grafana-agent
+  weight: 100
+  port:
+    targetPort: otlp
+  tls:
+    termination: edge
+    insecureEdgeTerminationPolicy: None
+    wildcardPolicy: None
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: grafana-agent
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      name: grafana-agent
+  serviceName: grafana-agent
+  template:
+    metadata:
+      labels:
+        name: grafana-agent
+    spec:
+      imagePullSecrets:
+        - name: grafana-agent-image-pull
+      containers:
+      - args:
+        - run
+        - --config.file=/etc/agent/grafana-agent-config.yaml
+        command: 
+        - /usr/bin/grafana-agent
+        env:
+        - name: HOSTNAME
+          valueFrom:
+            fieldRef:
+              fieldPath: spec.nodeName
+        - name: AGENT_MODE
+          value: flow
+        image: docker-enterprise-prod.artifactrepository.citigroup.net/cate-cmt-aim/grafana-agent:v0.40.1_A0
+        imagePullPolicy: IfNotPresent
+        name: grafana-agent
+        ports:
+        - containerPort: 4317
+          name: otlp
+        volumeMounts:
+        - mountPath: /etc/agent
+          name: grafana-agent-config
+      serviceAccount: grafana-agent
+      volumes:
+      - configMap:
+          name: grafana-agent-config
+        name: grafana-agent-config
+  updateStrategy:
+    type: RollingUpdate
