@@ -1,0 +1,199 @@
+---
+apiVersion: v1
+kind: ServiceAccount 
+metadata:
+  name: grafana-agent
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: grafana-agent-image-pull
+data:
+  .dockerconfigjson: >-
+    eyJhdXRocyI6eyJkb2NZXItZW50ZXJwcm1zZS1kZXYtbG9jYWwuYXJOaWZhY3RyZXBvc210b3J5LmNpdG1ncm91cC5uZXQiOnsidXN1cm5hbWUiOiJhZHN1bnN1bG9va3VwIiwicGFzc3dvcmQ¡0¡JBSONwNWVrVDI1OUhDYmd3UGVEeHJMZGpVdExubWlORIV1Z29LWGtwam0zNjhmV25mZTdWQj1EV3Fma25xTGF0QOR5RW1uV1NwIiwiYXV0aCI6IllXUnpaVzV6ZFd4dmIydDFjRHBCUzB0d05XVnJWREkxT1VoRF1tZDNVR1ZFZUhKTVpHcFzkRXh1YldsMFJsVjFaMj1MV0d0d2FtMHpOamhtVjIlbVpUZFdRamxFVjNGbWEyNXhUR0ZvUTBSNVJXMXVWMU53IiwiZW1
+type: kubernetes.io/dockerconfigjson
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-agent-config
+data:
+  grafana-agent.river: |
+    //https://grafana.com/docs/agent/latest/flow/reference/components/discovery.kubernetes/ 
+    discovery.Kubernetes "<<job-name>>" {
+      role = "pod"
+      namespaces {
+        own_namespace = true
+        names = ["xx_namespace_xx"]
+      }
+    }
+    //https://grafana.com/docs/agent/latest/flow/reference/components/discovery.relabel/
+    discovery.relabel "<<job-name>>" {
+        targets = discovery.kubernetes.<<job-name>.targets
+        rule {
+          source_labels = ["_meta_kubernetes_pod_annotation_metrics_io_scrape_targets"]
+          regex = "true"
+          action = "keep"
+        }
+    }
+    //https://grafana.com/docs/agent/latest/flow/reference/components/prometheus.scrape/
+    prometheus.scrape "<<job-name>>" {
+      targets = discovery.relabel. <<job-name>.output
+      forward_to = [prometheus.remote_write.gem.receiver]
+      job_name = "<<job-name>>"
+      metrics_path = "<<metrics_path»>" // default: /metrics
+      scheme = "<<http/https>>" // default: http
+      scrape_interval = "15s"
+    }
+    logging {
+      level = "debug"
+    }
+    //https://grafana.com/docs/agent/latest/flow/reference/components/remote.vault/ 
+    remote.vault "remote_write" {
+      server = https://dev-hcvault.nam.nsroot.net:8200
+      path = "kv2secret/<<csi-id>>/<<component>>/<<secret-name>>"
+      namespace = "citi"
+      auth. kubernetes{
+        role="xxxxxx" // Vault k8s Role(csiid-componenet-role_id) name to authenticate as
+        mount_path= "k8s-<<cluster_name>>"
+      }
+    }
+
+    // use this block to parametrize the agent config params - https://grafana.com/docs/agent/latest/flow/reference.components/rrmote.kubernetes.config/#remotekubernetesconfigmap
+    remote.kubernetes.configmap "labels" {
+        namespace = "namespace name"
+        name = "<<configmap_name"
+    }
+
+    //https://grafana.com/docs/agent/latest/flow/reference/components/prometheus.remote_write
+    prometheus.remote_write "gem" {
+      endpoint {
+        url = nonsesitive (remote.vault.remote_write.data.url)
+        basic_auth {
+          username = nonsesitive(remote.vault.remote_write.data.username)
+          password = nonsesitive(remote.vault.remote_write.data.topken)
+        }
+      }
+      external_labels = {
+          appid = remote.kubernetes.configmap.label.data[]
+          app_tier = remote.kubernetes.configmap.label.data[]
+          app_subtier = remote.kubernetes.configmap.label.data[]
+          business = remote.kubernetes.configmap.label.data[]
+          organization = remote.kubernetes.configmap.label.data[]
+          country = remote.kubernetes.configmap.label.data[]
+          datacenter = remote.kubernetes.configmap.label.data[]
+          environment = remote.kubernetes.configmap.label.data[]
+          region = remote.kubernetes.configmap.label.data[]
+        }
+    }
+---  
+apiVersion: v1
+kind: Service
+metadata:
+  name: grafana-agent
+spec:
+  ports:
+    - name: ui
+      protocol: TCP
+      port: 12345
+      targetPort: 12345
+  type: ClusterIP
+  selector:
+    name: grafana-agent
+---
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata:
+  name: grafana-agent
+  labels:
+    app: grafana-agent
+spec:
+  to:
+    kind: Service
+    name: grafana-agent
+  weight: 100
+  port:
+    targetPort: ui
+  tls:
+    termination: edge
+    insecureEdgeTerminationPolicy: None
+    wildcardPolicy: None
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: grafana-agent
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      name: grafana-agent
+  serviceName: grafana-agent
+  template:
+    metadata:
+      labels:
+        name: grafana-agent
+    spec:
+      imagePullSecrets:
+        - name: grafana-agent-image-pull
+      initContainers:
+        - name: init-permissions
+          image: >-
+            docker-enterprise-prod.artifactrepository.citigroup.net/citi-soe-rhel/rhelsubi:latest
+          command: ["/bin/sh", "-c", "mkdir -p /var/lib/agent/lost+found/wal && chmod -R 0775 /var/lib/agent/lost+found/wal"]
+          volumeMounts:
+            - name: agent-wal
+              mountPath: /var/lib/agent
+      containers:
+      - args:
+        - run
+        - /etc/agent/grafana-agent.river
+        - '--storage.path=/var/lib/agent'
+        - '--disable-reporting'
+        - '--server.http.listen-addr=$(PODIP):12345'
+        command: 
+        -  /usr/bin/grafana-agent
+        env:
+        - name: HOSTNAME
+          valueFrom:
+            fieldRef:
+              fieldPath: spec.nodeName
+        - name: AGENT_MODE
+          value: flow
+        - name: VAULT_CAPATH
+          value: '/cacerts/CitiInternalCAChain_UAT.pem'
+        - name: PODIP
+           valueFrom:
+            fieldRef:
+              apiVersion: v1
+              fieldPath: status.podIP
+        image: docker-enterprise-prod.artifactrepository.citigroup.net/cate-cmt-aim/grafana-agent:v0.40.1_A0
+        imagePullPolicy: IfNotPresent
+        name: grafana-agent
+        ports:
+        - containerPort: 12345
+          name: ui
+        volumeMounts:
+        - mountPath: /var/lib/agent
+          name: agent-wal
+        - mountPath: /etc/agent
+          name: grafana-agent-config
+      serviceAccount: grafana-agent
+      volumes:
+      - configMap:
+          name: grafana-agent-config
+        name: grafana-agent-config
+  updateStrategy:
+    type: RollingUpdate
+  volumeClaimTemplates:
+  - apiversion: v1
+    kind: PersistentVolumeClaim
+    metadata:
+      name: agent-wal
+    spec:
+      accessModes:
+      - ReadWriteOnce
+      resources: 
+        requests:
+          storage: 5Gi
+      storageClassName: <<other_than_default_sc>>
