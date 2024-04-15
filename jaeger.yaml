@@ -26,3 +26,17 @@ spec:
           value: "your_username" # Provide your Elasticsearch username
         - name: ES_PASSWORD
           value: "your_password" # Provide your Elasticsearch password
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: jaeger-nodeport
+spec:
+  type: NodePort
+  selector:
+    app: jaeger
+  ports:
+    - protocol: TCP
+      port: 16686
+      targetPort: 16686
