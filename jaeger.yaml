@@ -1,0 +1,28 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: jaeger
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: jaeger
+  template:
+    metadata:
+      labels:
+        app: jaeger
+    spec:
+      containers:
+      - name: jaeger
+        image: your-custom-repo/jaeger:latest
+        ports:
+        - containerPort: 16686
+        env:
+        - name: ES_SERVER_URL
+          value: "http://your-elasticsearch-server:9200" # Provide your Elasticsearch server details
+        - name: ES_INDEX_PREFIX
+          value: "your_index_prefix" # Provide your Elasticsearch index prefix
+        - name: ES_USERNAME
+          value: "your_username" # Provide your Elasticsearch username
+        - name: ES_PASSWORD
+          value: "your_password" # Provide your Elasticsearch password
