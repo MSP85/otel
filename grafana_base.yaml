@@ -19,105 +19,38 @@ metadata:
   name: grafana-agent-config
 data:
   grafana-agent.river: |
-    //https://grafana.com/docs/agent/latest/flow/reference/components/discovery.kubernetes/ 
-    discovery.Kubernetes "<<job-name>>" {
-      role = "pod"
-      namespaces {
-        own_namespace = true
-        names = ["xx_namespace_xx"]
+
+    otelcol.exporter.otlp "elastic" {
+      client {
+        endpoint = "my-otlp-grpc-server:4317"
+        auth = otelcol.auth.basic.credentials.handler
       }
+    }  
+
+    otelcol.auth.basic "elastic" {
+      username = env("BASIC_AUTH_USER")
+      password = env("API_KEY")
     }
-    //https://grafana.com/docs/agent/latest/flow/reference/components/discovery.relabel/
-    discovery.relabel "<<job-name>>" {
-        targets = discovery.kubernetes.<<job-name>.targets
-        rule {
-          source_labels = ["_meta_kubernetes_pod_annotation_metrics_io_scrape_targets"]
-          regex = "true"
-          action = "keep"
-        }
+
+    otelcol.receiver.otlp "otel" {
+      grpc {
+        endpoint = "0.0.0.0:4317"
+      }
+
+      http {
+        endpoint = "127.0.0.1:4318"
+      }
+
+      output {
+        metrics = [otelcol.exporter.otlp.elastic.input]
+        logs    = [otelcol.exporter.otlp.elastic.input]
+        traces  = [otelcol.exporter.otlp.elastic.input]
+      }  
     }
-    //https://grafana.com/docs/agent/latest/flow/reference/components/prometheus.scrape/
-    prometheus.scrape "<<job-name>>" {
-      targets = discovery.relabel. <<job-name>.output
-      forward_to = [prometheus.remote_write.gem.receiver]
-      job_name = "<<job-name>>"
-      metrics_path = "<<metrics_path»>" // default: /metrics
-      scheme = "<<http/https>>" // default: http
-      scrape_interval = "15s"
-    }
+    
     logging {
       level = "debug"
-    }
-    //https://grafana.com/docs/agent/latest/flow/reference/components/remote.vault/ 
-    remote.vault "remote_write" {
-      server = https://dev-hcvault.nam.nsroot.net:8200
-      path = "kv2secret/<<csi-id>>/<<component>>/<<secret-name>>"
-      namespace = "citi"
-      auth. kubernetes{
-        role="xxxxxx" // Vault k8s Role(csiid-componenet-role_id) name to authenticate as
-        mount_path= "k8s-<<cluster_name>>"
-      }
-    }
-
-    // use this block to parametrize the agent config params - https://grafana.com/docs/agent/latest/flow/reference.components/rrmote.kubernetes.config/#remotekubernetesconfigmap
-    remote.kubernetes.configmap "labels" {
-        namespace = "namespace name"
-        name = "<<configmap_name"
-    }
-
-    //https://grafana.com/docs/agent/latest/flow/reference/components/prometheus.remote_write
-    prometheus.remote_write "gem" {
-      endpoint {
-        url = nonsesitive (remote.vault.remote_write.data.url)
-        basic_auth {
-          username = nonsesitive(remote.vault.remote_write.data.username)
-          password = nonsesitive(remote.vault.remote_write.data.topken)
-        }
-      }
-      external_labels = {
-          appid = remote.kubernetes.configmap.label.data[]
-          app_tier = remote.kubernetes.configmap.label.data[]
-          app_subtier = remote.kubernetes.configmap.label.data[]
-          business = remote.kubernetes.configmap.label.data[]
-          organization = remote.kubernetes.configmap.label.data[]
-          country = remote.kubernetes.configmap.label.data[]
-          datacenter = remote.kubernetes.configmap.label.data[]
-          environment = remote.kubernetes.configmap.label.data[]
-          region = remote.kubernetes.configmap.label.data[]
-        }
-    }
----  
-apiVersion: v1
-kind: Service
-metadata:
-  name: grafana-agent
-spec:
-  ports:
-    - name: ui
-      protocol: TCP
-      port: 12345
-      targetPort: 12345
-  type: ClusterIP
-  selector:
-    name: grafana-agent
----
-apiVersion: route.openshift.io/v1
-kind: Route
-metadata:
-  name: grafana-agent
-  labels:
-    app: grafana-agent
-spec:
-  to:
-    kind: Service
-    name: grafana-agent
-  weight: 100
-  port:
-    targetPort: ui
-  tls:
-    termination: edge
-    insecureEdgeTerminationPolicy: None
-    wildcardPolicy: None
+    }    
 ---
 apiVersion: apps/v1
 kind: StatefulSet
@@ -173,6 +106,10 @@ spec:
         ports:
         - containerPort: 12345
           name: ui
+        - containerPort: 4317
+          name: otlp-grpc
+        - containerPort: 4318
+          name: otlp-http
         volumeMounts:
         - mountPath: /var/lib/agent
           name: agent-wal
@@ -197,3 +134,46 @@ spec:
         requests:
           storage: 5Gi
       storageClassName: <<other_than_default_sc>>
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: grafana-agent
+spec:
+  ports:
+    - name: ui
+      protocol: TCP
+      port: 12345
+      targetPort: 12345
+      nodePort: 31234
+    - name: otlp-grpc
+      protocol: TCP
+      port: 4317
+      targetPort: 4317
+      nodePort: 31235
+    - name: otlp-http
+      protocol: TCP
+      port: 4318
+      targetPort: 4318
+      nodePort: 31236
+  type: NodePort
+  selector:
+    name: grafana-agent
+---
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata:
+  name: grafana-agent
+  labels:
+    app: grafana-agent
+spec:
+  to:
+    kind: Service
+    name: grafana-agent
+  weight: 100
+  port:
+    targetPort: ui
+  tls:
+    termination: edge
+    insecureEdgeTerminationPolicy: None
+    wildcardPolicy: None
