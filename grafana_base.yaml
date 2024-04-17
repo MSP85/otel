@@ -22,7 +22,7 @@ data:
 
     otelcol.exporter.otlp "elastic" {
       client {
-        endpoint = "my-otlp-grpc-server:4317"
+        endpoint = "elasticsearch:9200"
         auth = otelcol.auth.basic.credentials.handler
       }
     }  
