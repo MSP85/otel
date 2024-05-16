@@ -1,0 +1,31 @@
+server:
+  log_level: debug
+  http_listen_port: 12345  # Port where Grafana Agent's HTTP server listens
+
+otel:
+  configs:
+    - name: otel-collector-config
+      receivers:
+        otlp:
+          protocols:
+            grpc:
+              endpoint: 0.0.0.0:4317  # The endpoint to receive OTLP data over gRPC
+            http:
+              endpoint: 0.0.0.0:4318  # The endpoint to receive OTLP data over HTTP
+
+      exporters:
+        otlp/elastic:
+          endpoint: http://elasticsearch:9200  # Use http or https based on your Elasticsearch setup
+          username: "your-username"  # Replace with your Elasticsearch username
+          password: "your-password"  # Replace with your Elasticsearch password
+          traces_index: "otel-traces"  # The index name for storing traces in Elasticsearch
+
+      service:
+        pipelines:
+          traces:
+            receivers: [otlp]
+            exporters: [otlp/elastic]
+
+integrations:
+  agent:
+    enabled: true
