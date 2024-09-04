@@ -5,8 +5,8 @@ FROM centos:8
 ENV OTEL_VERSION=<otel-collector-version>
 
 # Install necessary packages for RPM installation (skip epel-release and wget if not needed)
-RUN yum install -y \
-    && yum clean all
+#RUN yum install -y \
+ #   && yum clean all
 
 # Copy the local RPM into the Docker image
 COPY opentelemetry-collector-${OTEL_VERSION}-1.x86_64.rpm /tmp/opentelemetry-collector.rpm
@@ -16,10 +16,10 @@ RUN rpm -i /tmp/opentelemetry-collector.rpm \
     && rm /tmp/opentelemetry-collector.rpm
 
 # Copy your configuration file
-COPY otel-collector-config.yaml /etc/otel-collector-config.yaml
+# COPY otel-collector-config.yaml /etc/otel-collector-config.yaml
 
 # Expose necessary ports
-EXPOSE 4317 55680
+EXPOSE 4317 4318
 
 # Set the entrypoint to run the OpenTelemetry Collector
 ENTRYPOINT [ "/usr/bin/otelcol" ]
