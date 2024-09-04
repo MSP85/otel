@@ -1,0 +1,87 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: otel-collector
+  labels:
+    app: otel-collector
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: otel-collector
+  template:
+    metadata:
+      labels:
+        app: otel-collector
+    spec:
+      containers:
+        - name: otel-collector
+          image: your-otel-collector-image:latest
+          ports:
+            - containerPort: 4317 # OTLP/gRPC
+            - containerPort: 4318 # OTLP/HTTP
+          volumeMounts:
+            - name: otel-config
+              mountPath: /etc/otel-collector-config.yaml
+              subPath: otel-collector-config.yaml
+          command:
+            [ "/usr/bin/otelcol", "--config", "/etc/otel-collector-config.yaml" ]
+      volumes:
+        - name: otel-config
+          configMap:
+            name: otel-collector-config
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: otel-collector-config
+data:
+  otel-collector-config.yaml: |
+    receivers:
+      otlp:
+        protocols:
+          grpc:
+          http:
+
+    processors:
+      batch: {} # Batching processor to handle load
+      memory_limiter: # Limit memory usage
+        limit_mib: 500
+        spike_limit_mib: 200
+        check_interval: 1s
+      attributes:
+        actions:
+          - key: k8s.cluster.name
+            action: insert
+            value: "my-cluster"
+          - key: k8s.namespace.name
+            action: insert
+            value: "my-namespace"
+          - key: k8s.pod.name
+            action: insert
+            value: "my-pod"
+          - key: k8s.container.name
+            action: insert
+            value: "my-container"
+
+    exporters:
+      elastic:
+        apm_server_url: "http://your-elastic-apm-endpoint:8200"
+        secret_token: "<your-token>"
+        tls:
+          insecure_skip_verify: true
+      tempo:
+        endpoint: "http://your-grafana-tempo-endpoint:4317"
+        insecure: true
+
+    service:
+      pipelines:
+        traces:
+          receivers: [otlp]
+          processors: [memory_limiter, batch, attributes]
+          exporters: [elastic, tempo]
+        metrics:
+          receivers: [otlp]
+          processors: [memory_limiter, batch, attributes]
+          exporters: [elastic, tempo]
