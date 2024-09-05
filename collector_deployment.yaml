@@ -41,12 +41,12 @@ data:
     receivers:
       otlp:
         protocols:
-          grpc:
-          http:
+          grpc: {}
+          http: {}
 
     processors:
-      batch: {} # Batching processor to handle load
-      memory_limiter: # Limit memory usage
+      batch: {} 
+      memory_limiter:
         limit_mib: 500
         spike_limit_mib: 200
         check_interval: 1s
