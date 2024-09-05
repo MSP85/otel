@@ -1,0 +1,258 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: otel-collector
+  labels:
+    app: otel-collector
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: otel-collector
+  template:
+    metadata:
+      labels:
+        app: otel-collector
+    spec:
+      containers:
+        - name: otel-collector
+          image: docker-enterprise-dev-local.artifactrepository.citigroup.net/cate-citicloud-apm/otelcol:0.108.0
+          ports:
+            - containerPort: 4317 # OTLP/gRPC
+            - containerPort: 4318 # OTLP/HTTP
+            - containerPort: 8888 # Prometheus metrics
+          volumeMounts:
+            - name: otel-config
+              mountPath: /etc/otel-collector-config.yaml
+              subPath: otel-collector-config.yaml
+          env:
+            - name: OTEL_VERSION
+              value: "0.108.0"
+          command: [ "/usr/bin/otelcol", "--config", "/etc/otel-collector-config.yaml" ]
+      volumes:
+        - name: otel-config
+          configMap:
+            name: otel-collector-config
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: otel-collector-config
+data:
+  otel-collector-config.yaml: |
+    receivers:
+      otlp:
+        protocols:
+          http:
+            endpoint: 0.0.0.0:4318
+          #grpc:
+          #endpoint: 0.0.0.0:4317
+      prometheus:
+        config:
+          scrape_configs:
+            - job_name: "ideas-observ-otel-collector"
+              scrape_interval: 10s
+              static_configs:
+                - targets: ["0.0.0.0:8888"]
+              metric_relabel_configs:
+                - source_labels: [__name__]
+                  regex: '.*grpc_io.*'
+                  action: drop
+    extensions:
+      health_check:
+        endpoint: "0.0.0.0:13133"
+        path: "/health"
+    processors:
+      attributes/metrics_k8s_environment:
+        actions:
+          - key: deployment.environment
+            action: insert
+            value: development
+          - key: k8s.cluster.name
+            action: insert
+            value: REPLACE_ME
+          - key: k8s.container.name
+            action: insert
+            value: REPLACE_ME
+          - key: k8s.deployment.name
+            action: insert
+            value: REPLACE_ME
+          - key: k8s.namespace.name
+            action: insert
+            value: REPLACE_ME
+          - key: k8s.pod.name
+            action: insert
+            value: REPLACE_ME
+      batch:
+        send_batch_max_size: 11000
+        send_batch_size: 10000
+        timeout: 10s
+      memory_limiter:
+        check_interval: 1s
+        limit_percentage: 40
+        spike_limit_percentage: 10
+      resource/traces_k8s_environment:
+        attributes:
+          - key: deployment.environment
+            action: upsert
+            value: development
+          - key: k8s.cluster.name
+            action: upsert
+            value: REPLACE_ME
+          - key: k8s.container.name
+            action: upsert
+            value: REPLACE_ME
+          - key: k8s.deployment.name
+            action: upsert
+            value: REPLACE_ME
+          - key: k8s.namespace.name
+            action: upsert
+            value: REPLACE_ME
+          - key: k8s.pod.name
+            action: upsert
+            value: REPLACE_ME
+    exporters:
+      debug:
+        sampling_initial: 10
+        sampling_thereafter: 25
+        verbosity: detailed
+      otlp/elastic:
+        endpoint: "http://sd-6aa8-y61a.nam.nsroot.net:8200"
+        tls:
+          insecure: false
+          insecure_skip_verify: true
+      otlp/grafana:
+        endpoint: "http://traces-cti-ent-grafana-enterprise-traces-176443.apps.namctigtd26d.ecs.dyn.nsroot.net:443"
+        headers:
+          Authorization: "Basic dHJhY2Utc2FtcGxlLWFjY2Vzcy1wb2xpY3ktdHJhY2Utc2FtcGxlLXRva2VuOiM/PjBQKl4wODc4MH4xdzIoJHZtQDkvNw=="
+        tls:
+          insecure: false
+          insecure_skip_verify: true
+    service:
+      telemetry:
+        logs:
+          level: "debug"
+        metrics:
+          address: 0.0.0.0:8888
+          level: "normal"
+      extensions: [health_check]
+      pipeline:
+        traces:
+          exporters:
+            - debug
+            - otlp/elastic
+            - otlp/grafana
+          processors: [memory_limiter, resource/traces_k8s_environment, batch]
+          receivers: [otlp]
+        metrics:
+          exporters:
+            - debug
+            - otlp/elastic
+          processors: [memory_limiter, attributes/metrics_k8s_environment, batch]
+          receivers: [otlp, prometheus]
+
+---
+# Service for OTLP/gRPC
+apiVersion: v1
+kind: Service
+metadata:
+  name: otel-collector-grpc
+  labels:
+    app: otel-collector
+spec:
+  selector:
+    app: otel-collector
+  ports:
+    - protocol: TCP
+      port: 4317
+      targetPort: 4317
+      nodePort: 30017
+      name: otlp-grpc
+  type: NodePort
+
+---
+# Service for OTLP/HTTP
+apiVersion: v1
+kind: Service
+metadata:
+  name: otel-collector-http
+  labels:
+    app: otel-collector
+spec:
+  selector:
+    app: otel-collector
+  ports:
+    - protocol: TCP
+      port: 4318
+      targetPort: 4318
+      nodePort: 30018
+      name: otlp-http
+  type: NodePort
+
+---
+# Service for Prometheus Metrics
+apiVersion: v1
+kind: Service
+metadata:
+  name: otel-collector-metrics
+  labels:
+    app: otel-collector
+spec:
+  selector:
+    app: otel-collector
+  ports:
+    - protocol: TCP
+      port: 8888
+      targetPort: 8888
+      nodePort: 30088
+      name: metrics
+  type: NodePort
+
+---
+# Route for OTLP/gRPC
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata:
+  name: otel-collector-grpc
+spec:
+  to:
+    kind: Service
+    name: otel-collector-grpc
+  port:
+    targetPort: otlp-grpc
+  tls:
+    termination: edge
+    insecureEdgeTerminationPolicy: Redirect
+
+---
+# Route for OTLP/HTTP
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata:
+  name: otel-collector-http
+spec:
+  to:
+    kind: Service
+    name: otel-collector-http
+  port:
+    targetPort: otlp-http
+  tls:
+    termination: edge
+    insecureEdgeTerminationPolicy: Redirect
+
+---
+# Route for Prometheus Metrics
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata:
+  name: otel-collector-metrics
+spec:
+  to:
+    kind: Service
+    name: otel-collector-metrics
+  port:
+    targetPort: metrics
+  tls:
+    termination: edge
+    insecureEdgeTerminationPolicy: Redirect
