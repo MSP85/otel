@@ -16,7 +16,7 @@ spec:
     spec:
       containers:
         - name: otel-collector
-          image: your-otel-collector-image:latest
+          image: your-local-artifactory/otel-collector:latest
           ports:
             - containerPort: 4317 # OTLP/gRPC
             - containerPort: 4318 # OTLP/HTTP
@@ -24,6 +24,9 @@ spec:
             - name: otel-config
               mountPath: /etc/otel-collector-config.yaml
               subPath: otel-collector-config.yaml
+          env:
+            - name: OTEL_VERSION
+              value: "0.108.0"
           command:
             [ "/usr/bin/otelcol", "--config", "/etc/otel-collector-config.yaml" ]
       volumes:
@@ -67,15 +70,20 @@ data:
 
     exporters:
       elastic:
-        apm_server_url: "http://your-elastic-apm-endpoint:8200"
-        secret_token: "<your-token>"
+        apm_server_url: "http://your-insecure-elastic-apm-endpoint:8200"
         tls:
           insecure_skip_verify: true
       tempo:
-        endpoint: "http://your-grafana-tempo-endpoint:4317"
-        insecure: true
+        endpoint: "https://your-secured-grafana-tempo-endpoint:443"
+        headers:
+          Authorization: "Bearer <your-grafana-token>"
+        tls:
+          insecure_skip_verify: false
 
     service:
+      telemetry:
+        logs:
+          level: "debug"
       pipelines:
         traces:
           receivers: [otlp]
@@ -85,3 +93,42 @@ data:
           receivers: [otlp]
           processors: [memory_limiter, batch, attributes]
           exporters: [elastic, tempo]
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: otel-collector
+  labels:
+    app: otel-collector
+spec:
+  selector:
+    app: otel-collector
+  ports:
+    - protocol: TCP
+      port: 4317 # OTLP/gRPC
+      targetPort: 4317
+      nodePort: 30017
+      name: otlp-grpc
+    - protocol: TCP
+      port: 4318 # OTLP/HTTP
+      targetPort: 4318
+      nodePort: 30018
+      name: otlp-http
+  type: NodePort
+
+---
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata:
+  name: otel-collector
+spec:
+  host: otel-collector.apps.your-openshift-cluster.com # Your custom URL
+  to:
+    kind: Service
+    name: otel-collector
+  port:
+    targetPort: otlp-http
+  tls:
+    termination: edge # Optional, enable if using HTTPS for external access
+    insecureEdgeTerminationPolicy: Redirect # Redirect HTTP to HTTPS
