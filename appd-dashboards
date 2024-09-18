@@ -1,0 +1,39 @@
+GET http://<controller-host>:<port>/controller/CustomDashboardImportExportServlet?dashboardId=<dashboardId>
+
+curl -u username:password \
+"http://<controller-host>:<port>/controller/CustomDashboardImportExportServlet?dashboardId=<dashboardId>" \
+-o /path/to/save/dashboard_<dashboardId>.json
+
+
+GET http://<controller-host>:<port>/controller/restui/dashboards/getAllDashboards
+
+
+curl -u username:password \
+"http://<controller-host>:<port>/controller/restui/dashboards/getAllDashboards"
+
+
+#!/bin/bash
+CONTROLLER_HOST="<controller-host>"
+PORT="8090"  # Use "8181" if using HTTPS
+USERNAME="your-username"
+PASSWORD="your-password"
+BACKUP_DIR="/path/to/dashboard-backups"
+
+# Get all dashboard IDs
+dashboards=$(curl -u $USERNAME:$PASSWORD "http://$CONTROLLER_HOST:$PORT/controller/restui/dashboards/getAllDashboards" | jq -r '.[] | .id')
+
+# Iterate over each dashboard ID and back it up
+for dashboardId in $dashboards; do
+    echo "Backing up dashboard ID: $dashboardId"
+    curl -u $USERNAME:$PASSWORD \
+    "http://$CONTROLLER_HOST:$PORT/controller/CustomDashboardImportExportServlet?dashboardId=$dashboardId" \
+    -o $BACKUP_DIR/dashboard_$dashboardId.json
+done
+
+
+
+
+POST http://<controller-host>:<port>/controller/CustomDashboardImportExportServlet
+
+
+
