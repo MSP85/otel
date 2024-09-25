@@ -1,0 +1,130 @@
+I understand now! You need a **Standard Operating Procedure (SOP)** document that provides clear procedural steps, focusing on how to perform backup/snapshotting of AppDynamics configurations using their APIs, without diving too much into the code. I'll create a more procedural document for you.
+
+---
+
+# **Standard Operating Procedure (SOP) for Application Configuration Snapshots Using AppDynamics**
+
+### **1. Purpose**
+
+This SOP outlines the steps and requirements for performing application configuration snapshots using AppDynamics APIs. These backups ensure critical configuration data is securely stored, separate from metrics or trace data, for both UAT and production environments.
+
+### **2. Scope**
+
+This procedure applies to all AppDynamics UAT and production controllers and includes configurations such as dashboards, application settings, health rules, policies, actions, and transaction snapshots.
+
+### **3. Frequency of Snapshots**
+
+- **UAT Environment**:
+  - Snapshots must be taken **weekly**.
+  - This is sufficient to capture most changes while keeping storage usage minimal.
+  
+- **Production Environment**:
+  - Snapshots must be taken **daily**.
+  - This ensures minimal data loss in case of a disaster, as production environments are highly critical.
+
+### **4. Storage Locations**
+
+- **Primary Storage**: Store the backups locally on the AppDynamics controller server.
+- **Secondary Storage (Remote)**: To ensure redundancy, remote backups should be stored using a remote/cloud storage solution like NetBackup, AWS S3, or Azure Blob Storage.
+
+### **5. Retention Policy**
+
+- **UAT**: Retain weekly backups for 1 month.
+- **Production**: Retain daily backups for 2 weeks and weekly snapshots for 3 months.
+
+### **6. Required Entities to Capture in Snapshots**
+
+Snapshots must include the following AppDynamics configurations:
+
+1. **Dashboards**:
+   - Capture both pre-configured and custom dashboards, including all widgets, layouts, and data sources.
+
+2. **Application Configurations**:
+   - **Health Rules, Policies, and Actions**: Ensure all configurations that trigger alerts and notifications are backed up.
+   - **Custom Metrics**: Any custom-defined metrics should be exported.
+   - **Transaction Snapshots and Flow Maps**: Include configurations for transaction snapshots and flow maps for detailed monitoring.
+
+3. **Controller-Level Configurations**:
+   - **Controller Settings**: Include global settings, controller versions, and cluster configurations (if applicable).
+   - **License Information**: Ensure the backup includes current license information.
+   - **User Roles and Permissions**: Backup user permissions and roles to preserve access control configurations.
+
+### **7. Backup Methodology**
+
+The backup process should be automated and follow a strict schedule.
+
+#### **7.1. Tools Required**
+- **AppDynamics API**: The AppDynamics Import/Export API will be used to capture the required configuration data.
+- **Scripting**: Shell scripts or Python scripts can be used to automate the backup process.
+- **Scheduler**: Use cron jobs (on Linux) or Task Scheduler (on Windows) to execute the scripts regularly.
+
+#### **7.2. Instructions for Executing the Backup**
+
+1. **Dashboards**:
+   - Use the AppDynamics API to export the dashboards. The export must capture all custom dashboard configurations, including data sources and widgets.
+   - **Procedure**:
+     - Access the API for dashboard export using the provided endpoint (`/controller/CustomDashboardImportExportServlet`).
+     - Authenticate using valid AppDynamics credentials.
+     - Save the exported configuration in JSON format and store it in the designated backup folder.
+
+2. **Application Health Rules, Policies, and Actions**:
+   - Export all health rules, policies, and actions for the application using the API.
+   - **Procedure**:
+     - Identify the application ID for the specific environment.
+     - Use the AppDynamics API endpoint (`/controller/healthrules/{application_id}`) to export health rules.
+     - Save the output to the backup folder.
+
+3. **Transaction Snapshots**:
+   - Export transaction snapshot configurations to ensure flow maps and transactions are backed up.
+   - **Procedure**:
+     - Use the API (`/controller/rest/applications/<application_name>/snapshots/config`) to export the snapshot configurations.
+     - Store the output in the designated folder.
+
+4. **User Roles and Permissions**:
+   - Backup user permissions and roles to maintain consistent security configurations.
+   - **Procedure**:
+     - Export the roles and permissions for all users in JSON format using AppDynamics API.
+     - Store the configuration file securely.
+
+### **8. Validating the Backups**
+
+1. **Periodic Testing**:
+   - Perform periodic test restores of the configurations (quarterly) in both UAT and production environments.
+   - Ensure that all configurations, including dashboards, health rules, and permissions, are restored successfully.
+
+2. **Backup Monitoring**:
+   - Implement monitoring to ensure backups run successfully. An alert system should notify administrators if a backup fails or does not complete within the expected time frame.
+
+### **9. Step-by-Step Backup Execution Process**
+
+1. **Log into the AppDynamics Controller** with administrator credentials.
+   
+2. **Run the backup script** (automated via cron job or manually if needed).
+   - Verify that the script exports the following:
+     - Dashboards
+     - Application Configurations (health rules, custom metrics, transaction snapshots)
+     - Controller and License Configurations
+     - User Roles and Permissions
+
+3. **Verify that all exported files** are stored in the designated local and remote storage locations.
+
+4. **Check for backup errors** in the logs. Any failures must be reported and fixed immediately.
+
+### **10. Post-backup Validation**
+
+1. **Ensure the backup files exist** in both local and remote storage locations.
+2. **Verify the integrity** of the JSON files to ensure that they can be imported back into AppDynamics.
+3. **Perform spot-check restores** in UAT to ensure the backup process is effective.
+
+---
+
+### **Appendix: API References**
+
+- **Dashboard Export API**: `/controller/CustomDashboardImportExportServlet?action=export`
+- **Health Rules Export API**: `/controller/healthrules/{application_id}`
+- **Application Config Export API**: `/controller/rest/applications/<application_name>/config`
+- **Transaction Snapshot Config Export API**: `/controller/rest/applications/<application_name>/snapshots/config`
+
+---
+
+This SOP ensures that all critical configurations in AppDynamics are backed up regularly, stored securely, and can be restored quickly in the event of a failure.
