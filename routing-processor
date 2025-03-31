@@ -1,0 +1,121 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: otel-collector
+  labels:
+    app: otel-collector
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: otel-collector
+  template:
+    metadata:
+      labels:
+        app: otel-collector
+    spec:
+      containers:
+        - name: otel-collector
+          image: your-local-artifactory/otel-collector:latest
+          ports:
+            - containerPort: 4317 # OTLP/gRPC
+            - containerPort: 4318 # OTLP/HTTP
+          volumeMounts:
+            - name: otel-config
+              mountPath: /etc/otel-collector-config.yaml
+              subPath: otel-collector-config.yaml
+          env:
+            - name: OTEL_VERSION
+              value: "0.108.0"
+          command:
+            [ "/usr/bin/otelcol", "--config", "/etc/otel-collector-config.yaml" ]
+      volumes:
+        - name: otel-config
+          configMap:
+            name: otel-collector-config
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: otel-collector-config
+data:
+  otel-collector-config.yaml: |
+    receivers:
+      otlp:
+        protocols:
+          grpc: {}
+          http: {}
+
+    processors:
+      batch: {}
+      memory_limiter:
+        limit_mib: 500
+        spike_limit_mib: 200
+        check_interval: 1s
+      attributes:
+        actions:
+          - key: k8s.cluster.name
+            action: insert
+            value: "my-cluster"
+          - key: k8s.namespace.name
+            action: insert
+            value: "my-namespace"
+          - key: k8s.pod.name
+            action: insert
+            value: "my-pod"
+          - key: k8s.container.name
+            action: insert
+            value: "my-container"
+      routing:
+        from_attribute: service.name
+        table:
+          service-A:
+            - traces/service-a
+          service-B:
+            - traces/service-b
+
+    exporters:
+      elastic:
+        apm_server_url: "http://your-insecure-elastic-apm-endpoint:8200"
+        tls:
+          insecure_skip_verify: true
+      tempo:
+        endpoint: "https://your-secured-grafana-tempo-endpoint:443"
+        headers:
+          Authorization: "Bearer <your-grafana-token>"
+        tls:
+          insecure_skip_verify: false
+
+    connectors:
+      routing:
+        default_pipelines:
+          - traces/jaeger
+          - traces/elastic
+
+    service:
+      telemetry:
+        logs:
+          level: "debug"
+      pipelines:
+        traces:
+          receivers: [otlp]
+          processors: [memory_limiter, batch, attributes, routing]
+          exporters: [elastic, tempo]
+        
+        traces/service-a:
+          receivers: [otlp]
+          exporters: [jaeger]
+        
+        traces/service-b:
+          receivers: [otlp]
+          exporters: [elastic]
+        
+        # Fan-out to multiple destinations
+        traces/jaeger:
+          receivers: [routing]
+          exporters: [jaeger]
+        
+        traces/elastic:
+          receivers: [routing]
+          exporters: [elastic]
