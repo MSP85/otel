@@ -1,0 +1,91 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: jaeger-2
+  labels:
+    app: jaeger-2
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: jaeger-2
+  template:
+    metadata:
+      labels:
+        app: jaeger-2
+    spec:
+      containers:
+      - name: jaeger
+        image: jaegertracing/all-in-one:1.54
+        ports:
+        - containerPort: 16686  # UI
+        - containerPort: 14268  # HTTP ingestion
+        - containerPort: 14250  # gRPC ingestion
+        - containerPort: 6831   # UDP Thrift compact
+        - containerPort: 6832   # UDP Thrift binary
+        env:
+        - name: COLLECTOR_ZIPKIN_HTTP_PORT
+          value: "9411"
+        - name: SPAN_STORAGE_TYPE
+          value: "badger"
+        - name: BADGER_DIRECTORY_VALUE
+          value: "/badger/data"
+        - name: BADGER_DIRECTORY_KEY
+          value: "/badger/key"
+        volumeMounts:
+        - name: jaeger-storage-2
+          mountPath: /badger
+      volumes:
+      - name: jaeger-storage-2
+        persistentVolumeClaim:
+          claimName: jaeger-pvc-2
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: jaeger-pvc-2
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 5Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: jaeger-2
+spec:
+  ports:
+  - name: ui
+    port: 16686
+    targetPort: 16686
+  - name: http-ingest
+    port: 14268
+    targetPort: 14268
+  - name: grpc-ingest
+    port: 14250
+    targetPort: 14250
+  - name: thrift-compact
+    port: 6831
+    targetPort: 6831
+    protocol: UDP
+  - name: thrift-binary
+    port: 6832
+    targetPort: 6832
+    protocol: UDP
+  selector:
+    app: jaeger-2
+---
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata:
+  name: jaeger-2
+spec:
+  to:
+    kind: Service
+    name: jaeger-2
+  port:
+    targetPort: 16686
+  tls:
+    termination: edge
