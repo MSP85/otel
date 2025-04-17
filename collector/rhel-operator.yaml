@@ -1,0 +1,136 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: otel-collector-config
+data:
+  otel-collector-config.yaml: |
+    receivers:
+      otlp:
+        protocols:
+          http:
+            endpoint: 0.0.0.0:4318
+          grpc:
+            endpoint: 0.0.0.0:4317
+      prometheus:
+        config:
+          scrape_configs:
+            - job_name: "ideas-observ-otel-collector"
+              scrape_interval: 10s
+              static_configs:
+                - targets: ["0.0.0.0:8888"]
+              metric_relabel_configs:
+                - source_labels: [__name__]
+                  regex: '.*grpc_io.*'
+                  action: drop
+    extensions:
+      health_check:
+        endpoint: "0.0.0.0:13133"
+        path: "/health"
+    processors:
+      filter/spans_wout_csi_id:
+        error_mode: ignore
+        traces:
+          span:
+            - 'resource.attributes["citi.csi.id"] == nil'
+            - 'IsMatch(resource.attributes["citi.csi.id"], "[0-9]{6}") == false'
+      attributes/metrics_k8s_environment:
+        actions:
+          - key: deployment.environment
+            action: insert
+            value: {{ .Values.config.environment }}
+          - key: k8s.cluster.name
+            action: insert
+            value: REPLACE_ME
+          - key: k8s.container.name
+            action: insert
+            value: REPLACE_ME
+          - key: k8s.deployment.name
+            action: insert
+            value: REPLACE_ME
+          - key: k8s.namespace.name
+            action: insert
+            value: REPLACE_ME
+          - key: k8s.pod.name
+            action: insert
+            value: REPLACE_ME
+      batch:
+        send_batch_max_size: 11000
+        send_batch_size: 10000
+        timeout: 10s
+      memory_limiter:
+        check_interval: 10s
+        limit_percentage: 40
+        spike_limit_percentage: 10
+      resource/traces_k8s_environment:
+        attributes:
+          - key: deployment.environment
+            action: upsert
+            value: development
+          - key: k8s.cluster.name
+            action: upsert
+            value: REPLACE_ME
+          - key: k8s.container.name
+            action: upsert
+            value: REPLACE_ME
+          - key: k8s.deployment.name
+            action: upsert
+            value: REPLACE_ME
+          - key: k8s.namespace.name
+            action: upsert
+            value: REPLACE_ME
+          - key: k8s.pod.name
+            action: upsert
+            value: REPLACE_ME
+    exporters:
+      debug:
+        sampling_initial: 10
+        sampling_thereafter: 25
+        verbosity: detailed
+      otlp/elastic:
+        endpoint: "http://sd-6aa8-y61a.nam.nsroot.net:8200"
+        tls:
+          insecure: true
+      otlphttp/grafana:
+        endpoint: "https://traces-cti-ent-grafana-enterprise-traces-176443.apps.namctigtd26d.ecs.dyn.nsroot.net:443"
+        headers:
+          authorization: "Basic dHJhY2Utc2FtcGxlLWFwOmRISmhZMlV0YzJGdGNHeGxMV0ZqWTJWemN5MXdiMnhwWTNrdGRISmhZMlV0YzJGdGNHeGxMWFJ2YTJWdU9pTS9QakJRS2w0d09EYzRNSDR4ZHpJb0pIWnRRRGt2Tnc9PQ=="
+        tls:
+          insecure: false
+          insecure_skip_verify: true
+      otlphttp/grafana-metrics:
+        endpoint: "https://metrics-cti-ent-grafana-enterprise-metrics-176443.apps.namctigtd26d.ecs.dyn.nsroot.net:443"
+        headers:
+          authorization: "Basic dHJhY2xlLWFwaT..."
+        tls:
+          insecure: false
+          insecure_skip_verify: true
+      otlp/jaeger:
+        endpoint: "http://sd-mn13-xbu1.nam.nsroot.net:4317"
+        tls:
+          insecure: true
+    service:
+      telemetry:
+        logs:
+          sampling:
+            enabled: false
+          level: "debug"
+        metrics:
+          address: 0.0.0.0:8888
+          level: "normal"
+      extensions: [health_check]
+      pipelines:
+        traces:
+          exporters:
+            - debug
+            - otlp/elastic
+            - otlphttp/grafana
+            - otlp/jaeger
+          processors: [memory_limiter, resource/traces_k8s_environment, filter/spans_wout_csi_id, batch]
+          receivers: [otlp]
+        metrics:
+          exporters:
+            - debug
+            - otlp/elastic
+            - otlphttp/grafana-metrics
+          processors: [memory_limiter, attributes/metrics_k8s_environment, filter/spans_wout_csi_id, batch]
+          receivers: [otlp, prometheus]
